@@ -29,3 +29,19 @@ const r2=new context.PianoRoll(new Element());assert.equal(r2.getNotes().length,
 host.shadowRoot.getElementById('apply').onclick=host.shadowRoot.getElementById('apply').onclick;host.shadowRoot.getElementById('progression').value='dream';host.shadowRoot.getElementById('apply').onclick();assert(r.getNotes().length>3);
 r.destroy();r.destroy();assert.throws(()=>r.setNotes([]));r2.destroy();assert.equal(doc.listeners.size,0);
 console.log('PASS: helper boundaries, clipboard, navigation, constructor, API, history, import validation, chord template, isolation, destroy.');
+(async()=>{
+ context.AudioContext=class{constructor(){this.currentTime=10}async resume(){}close(){this.closed=true}};
+ context.setInterval=()=>1;
+ let calls=[],stops=0,inits=0;
+ const adapter={async initialize({context:ctx}){assert.equal(ctx.currentTime,10);inits++},scheduleNote(event){calls.push(event)},stop(){stops++}};
+ const player=new context.PianoRoll(new Element(),{instrument:adapter,notes:[{midi:60,start:0,length:1,velocity:.8}]});
+ await player.play();assert.equal(inits,1);assert.equal(calls.length,1);assert.equal(calls[0].midi,60);assert(calls[0].time>=10);assert(calls[0].duration>0);
+ player.pause();await player.play();assert.equal(inits,1);
+ const before=stops;let otherCalls=0;
+ player.setInstrument({scheduleNote(){otherCalls++},stop(){}});assert(stops>before);await player.play();assert.equal(otherCalls,1);
+ assert.throws(()=>player.setInstrument({scheduleNote(){}}));player.destroy();
+ let finish,scheduled=0;
+ const pending=new context.PianoRoll(new Element(),{notes:[{midi:60,start:0,length:1,velocity:.8}],instrument:{initialize(){return new Promise(resolve=>finish=resolve)},scheduleNote(){scheduled++},stop(){}}});
+ const start=pending.play();await new Promise(setImmediate);pending.setInstrument(null);finish();await start;assert.equal(scheduled,0);pending.destroy();
+ console.log('PASS: instrument initialization, scheduled timing, cached readiness, switching cancellation, validation and pending-load cancellation.');
+})().catch(e=>{console.error(e);process.exitCode=1});

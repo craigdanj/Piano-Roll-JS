@@ -2,7 +2,7 @@
 
 A dependency-free, embeddable piano roll extracted from Ambient Pad JS. MIT licensed. Includes the original editing, navigation, chord and harmony capabilities, without depending on the Ambient Pad synthesizer.
 
-Open **demo.html** in a modern browser to try it. No install, build step, CDN, or server is needed. Click Play to enable browser audio. `demo.js` supplies a lightweight oscillator instrument; it is deliberately separate from the editor.
+Open **demo.html** in a modern browser to try it. No install, build step, CDN, or server is needed. Click Play to enable browser audio. `demo-instruments.js` supplies lightweight example instruments; it is deliberately separate from the editor.
 
 ## Embed
 
@@ -64,7 +64,7 @@ The single `piano-roll.js` file includes its styles, UI and pure editing/navigat
 
 Constructor: `new PianoRoll(elementOrSelector, options)`.
 
-Options: `project` (full project), `notes` (initial notes), `bars` (1–128, default 8), `audioContext` (optional shared context), `onNote`, `onStop`, `onChange`. `project` takes priority over `notes`. Without a project or notes, the editor starts blank.
+Options: `instrument` (see below), `project` (full project), `notes` (initial notes), `bars` (1–128, default 8), `audioContext` (optional shared context), `onNote`, `onStop`, `onChange`. `project` takes priority over `notes`. Without a project or notes, the editor starts blank.
 
 | Method | Behavior |
 |---|---|
@@ -99,3 +99,36 @@ The editor schedules events roughly 120 ms ahead against Web Audio's clock. `tim
 ## Verification
 
 Run `node tests/regression.cjs`. Covers the bundled helpers and DOM-harness API behavior, including import rejection, undo/redo, isolation and cleanup. Real-browser visual and audible testing could not be completed in the build environment because Chromium installation failed.
+
+## Pluggable instruments (v1.1)
+
+Pass `instrument` to the constructor, or call `roll.setInstrument(adapter)` to switch. `roll.getInstrument()` returns the current adapter. Switching pauses the transport and cancels the previous instrument's scheduled voices; call `play()` to resume. Pass `null` to return to the legacy `onNote`/`onStop` callbacks. When an instrument is attached, those legacy callbacks are bypassed (DOM note/stop events still fire).
+
+```js
+const adapter = {
+  async initialize({ context }) {
+    // Optional: construct your instrument using this exact AudioContext,
+    // load/decode samples, and await readiness. Runs once per attachment.
+    // Keep initialization silent; do not start notes here.
+  },
+  scheduleNote({ midi, time, duration, velocity, context }) {
+    // Required: schedule a voice immediately using absolute AudioContext time.
+    // MIDI pitch: integer. Duration: seconds. Velocity: 0.1–1.
+  },
+  stop() {
+    // Required: cancel both sounding voices AND future scheduled voices.
+    // Must be synchronous, safe to repeat, and safe before initialization.
+  }
+};
+const roll = new PianoRoll('#notes', { instrument: adapter });
+// Later:
+roll.setInstrument(anotherAdapter);
+```
+
+This interface supports synthesized instruments, sampled instruments and drum samplers that map MIDI pitches to sounds. Load samples in `initialize`, then use `AudioBufferSourceNode.start(time)` and a pitch ratio based on the sample's root MIDI note in `scheduleNote`. Track every source so `stop` can cancel notes already scheduled ahead of the playhead.
+
+For Piano JS or another existing plugin, create a small wrapper that translates this contract to that plugin's actual note and stop methods. Supply its AudioContext via the `audioContext` option if it already owns one. Instrument APIs are not assumed to be identical: the package does not bundle Piano JS or claim automatic compatibility without a wrapper.
+
+The host owns instrument resources and must dispose them when no longer needed. The editor invokes `stop` on switch/destroy, but never disposes externally owned instruments. Async initialization must only load/prepare resources, must tolerate a later stop, and must not start audio itself. A completed stale initialization cannot schedule editor notes after an instrument switch or destroy. Failed initialization may be retried by pressing Play.
+
+`demo-instruments.js` contains independent soft-synth, organ-style and plucked-synth adapters. They demonstrate interchangeable instruments, not realistic acoustic emulations. `demo.js` connects the selected adapter to the piano roll.
